@@ -147,6 +147,11 @@ int	count_cmds(t_cmd *cmd)
 	}
 	return i;
 }
+
+void	ft_error(char *msg)
+{
+	write(STDERR_FILENO, msg, ft_strlen(msg));
+}
 int *allocation_array(int size)
 {
 	int	*tab;
@@ -158,6 +163,25 @@ int *allocation_array(int size)
 	while (i < size)
 		tab[i++] = 0;
 	return (tab);
+}
+
+bool	is_blt(char **cmd)
+{
+	int	count = count_arrays(cmd);
+	if (strcmp(cmd[0], "cd") != 0)
+		return (false);
+	if (count != 2)
+	{
+		ft_error("error: cd: bad arguments\n");
+		return (true);
+	}
+	int st = chdir(cmd[1]);
+	if (st < 0)
+	{
+		ft_error("error: cd: cannot change directory to path_to_change\n");
+		return (true);
+	}
+	return (true);
 }
 
 void	controle_fd(t_cmd *cmds, t_fd *fd)
@@ -175,13 +199,17 @@ void	controle_fd(t_cmd *cmds, t_fd *fd)
 	close(fd->fd[1]);
 }
 
-void	execut_(t_cmd *cmds, char **envp, t_fd fd)
+int	execut_(t_cmd *cmds, char **envp, t_fd fd)
 {
 	int	i;
 	int size;
 	int	*pids;
 	int	*fd_pipe;
 
+	if (!cmds || !(cmds->cmds) || !*(cmds->cmds))
+		return (0);
+	if (is_blt(cmds->cmds))
+		return (0);
 	size = count_cmds(cmds);
 	pids = allocation_array(size);
 	fd_pipe = allocation_array(size);
@@ -191,11 +219,25 @@ void	execut_(t_cmd *cmds, char **envp, t_fd fd)
 		pipe(fd.fd);
 		fd.pid = fork();
 		if (fd.pid < 0)
+		{
 			perror("fork");
+			i = 0;
+			while (i < size)
+			{
+				if (fd_pipe[i] != 0)
+					close(fd_pipe[i]);
+				i++;
+			}
+			free(fd_pipe), free(pids);
+		}
 		if (fd.pid == 0)
 		{
 			controle_fd(cmds, &fd);
 			execve(cmds->cmds[0], cmds->cmds, envp);
+			free(fd_pipe), free(pids);
+			ft_error("error: cannot execute ");
+			ft_error(cmds->cmds[0]);
+			ft_error("\n");
 			exit(0);
 		}
 		else if (fd.pid > 0)
@@ -216,8 +258,13 @@ void	execut_(t_cmd *cmds, char **envp, t_fd fd)
 		i++;
 	}
 	i = 0;
+	int status;
 	while (i < size)
-		waitpid(pids[i++], NULL, 0);
+	{
+		waitpid(pids[i++], &status, 0);
+		status = WEXITSTATUS(status);
+	}
+	return (status);
 }
 
 char	**parsing(char **cmds, int *c)
@@ -237,25 +284,26 @@ char	**parsing(char **cmds, int *c)
 int main(int ac, char **av, char **envp)
 {
 	int		count;
+	int status = 0;
 	t_cmds	*cmds;
-	t_cmd	*cmd;
 	t_fd	fd;
 
 	cmds = NULL;
 	count = 1;
+    if (strcmp(av[ac - 1], "|") == 0)
+        return (0);
 	while (count < ac)
 	{
 		creat_cmd(&cmds, av, &count);
 		count++;
 	}
-	int i = 0;
 	while (cmds)
 	{
 		fd.fd_in = STDIN_FILENO;
 		fd.fd_out = STDOUT_FILENO;	
-		execut_(cmds->cmd, envp, fd);
+		status = execut_(cmds->cmd, envp, fd);
 
 		cmds = cmds->next;
 	}
-	return (0);
+	return (status);
 }
